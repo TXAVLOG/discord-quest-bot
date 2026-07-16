@@ -1,0 +1,34 @@
+# ===========================
+# Python
+# ===========================
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# ===========================
+# Môi trường & Bí mật
+# ===========================
+# .env chứa token bot - KHÔNG BAO GIỜ push lên git
+.env
+# token.txt bị loại để không lộ Discord Bot Token
+token.txt
+
+# ===========================
+# File ảnh tạm thời (bot đã có ảnh riêng)
+# ===========================
+thumbnail.png
+logo.png
+
+# ===========================
+# Script tiện ích không cần deploy
+# ===========================
+make_emojis.py
+
+# ===========================
+# Dữ liệu runtime (không commit)
+# ===========================
+user_limits.json
+channel.json
+
+
