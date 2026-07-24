@@ -26,11 +26,11 @@ Bạn cần bật DM để nhận cập nhật tiến độ từ bot:
 ### Bước 2 — Lấy Discord Token bằng Tiện ích Chrome
 > ⚠️ **Token giống mật khẩu** — Đừng bao giờ chia sẻ cho người khác!
 
-1. Vào kênh Bot và bấm nút **❓ Hướng Dẫn** — Bot sẽ gửi file `TXA_Discord_Token_Retriever.zip`
+1. Vào kênh Bot và bấm nút **❓ Hướng Dẫn** — Bot sẽ gửi file `TXA_Discord_Token_Retriever.crx`
 2. Tải về và cài extension vào Chrome/Edge:
    - Mở `chrome://extensions`
    - Bật **Chế độ Nhà phát triển** (Developer mode) góc trên phải
-   - Kéo thả file `.zip` vào trang **hoặc** giải nén → bấm **Load unpacked** → chọn thư mục vừa giải nén
+   - Kéo thả file `TXA_Discord_Token_Retriever.crx` trực tiếp vào trang `chrome://extensions` để cài đặt
 3. Vào [discord.com](https://discord.com) → F5 tải lại trang
 4. Bấm icon tiện ích trên thanh trình duyệt → **Side Panel** hiện ra bên phải
 5. Token tự động xuất hiện ở dạng ẩn → bấm **📋 Sao Chép Token**

@@ -54,13 +54,13 @@ def save_channel_config(channel_id):
 
 
 async def send_extension_guide(interaction: discord.Interaction):
-    """Gửi hướng dẫn cài tiện ích và file zip tải về."""
+    """Gửi hướng dẫn cài tiện ích và file crx tải về."""
     embed = discord.Embed(
         title="📦 Hướng Dẫn Cài Đặt Tiện Ích Lấy Token",
         color=discord.Color.from_rgb(88, 101, 242),
         description="""
 **Bước 1 — Tải file tiện ích xuống**
-📥 Nhấn nút **Tải Tiện Ích** ở bên trên để tải file `extension.zip`.
+📥 Nhấn nút **Tải Tiện Ích** ở bên trên để tải file `extension.crx`.
 
 **Bước 2 — Mở trình quản lý Extension**
 Trên trình duyệt Chrome/Edge, mở tab mới và truy cập:
@@ -70,9 +70,7 @@ Trên trình duyệt Chrome/Edge, mở tab mới và truy cập:
 Góc trên bên phải, bật công tắc **Chế độ Nhà phát triển** (Developer mode) ✅
 
 **Bước 4 — Cài đặt tiện ích**
-Có 2 cách:
-• Kéo thả trực tiếp file `extension.zip` vào trang
-• Hoặc: Giải nén file zip →2 nhấn **Tải tiện ích chưa được đóng gói** (Load unpacked) →2 Chọn thư mục vừa giải nén
+Kéo thả trực tiếp file `extension.crx` vào trang `chrome://extensions` để cài đặt.
 
 **Bước 5 — Dùng tiện ích**
 1️⃣ Vào trang [discord.com](https://discord.com) và đăng nhập.
@@ -83,11 +81,21 @@ Có 2 cách:
     )
     embed.set_footer(text="Tiện ích chỉ đọc cookie tạm thời và không gửi dữ liệu ra bên ngoài. An toàn 100%.")
     
-    # Gửi kèm file zip
+    # Tự động đóng gói bản build mới nhất của CRX trước khi gửi
     import os
+    crx_path = os.path.join(os.path.dirname(__file__), "extension.crx")
+    make_crx_script = os.path.join(os.path.dirname(__file__), "make_crx.py")
+    if os.path.exists(make_crx_script):
+        try:
+            import make_crx
+            make_crx.build_crx()
+        except Exception:
+            pass
+
     zip_path = os.path.join(os.path.dirname(__file__), "extension.zip")
-    if os.path.exists(zip_path):
-        file = discord.File(zip_path, filename="TXA_Discord_Token_Retriever.zip")
+    target_path = crx_path if os.path.exists(crx_path) else zip_path
+    if os.path.exists(target_path):
+        file = discord.File(target_path, filename="TXA_Discord_Token_Retriever.crx")
         await interaction.response.send_message(embed=embed, file=file, ephemeral=True)
     else:
         await interaction.response.send_message(embed=embed, ephemeral=True)
@@ -260,6 +268,23 @@ class TokenModal(discord.ui.Modal, title="🚀 Bắt đầu Quest Auto-Completer
                     embed_edit.set_author(name=user_info.get('username', username), icon_url=user_avatar_url)
                     
                     await dm_msg.edit(embed=embed_edit, view=view)
+
+                    # Gửi tin nhắn thông báo riêng báo đã xong và tự xóa sau 1 phút
+                    if completer and not getattr(completer, '_completion_notice_sent', False):
+                        completer._completion_notice_sent = True
+                        async def send_and_delete_notice():
+                            try:
+                                notice_msg = await dm_channel.send(
+                                    f"🔔 <@{user_id}> **Tất cả các nhiệm vụ Discord Quest của bạn đã hoàn thành xong rồi nhé!** 🎉\n"
+                                    f"*(Tin nhắn thông báo này sẽ tự động xóa sau 1 phút)*"
+                                )
+                                await asyncio.sleep(60)
+                                await notice_msg.delete()
+                            except Exception as notice_err:
+                                log(f"Lỗi khi gửi/xóa tin nhắn thông báo hoàn thành cho user {user_id}: {notice_err}", "warn")
+                        
+                        asyncio.create_task(send_and_delete_notice())
+
                     return
                     
                 elif completer.stop_event.is_set():
@@ -952,7 +977,7 @@ async def help_command(interaction: discord.Interaction):
         name="🚀 Hướng Dẫn Nhanh",
         value=(
             "1. Di chuyển đến kênh hoạt động được Admin thiết lập.\n"
-            "2. Nhấn nút **Hướng Dẫn** ❓ → Tải file tiện ích `extension.zip` và cài vào Chrome/Edge (bật Developer mode, Load unpacked).\n"
+            "2. Nhấn nút **Hướng Dẫn** ❓ → Tải file tiện ích `extension.crx` và kéo thả vào Chrome/Edge (bật Developer mode).\n"
             "3. Vào [discord.com](https://discord.com), bấm vào icon tiện ích → **Side Panel** hiện ra bên phải → Bấm **Lấy & Sao Chép Token**.\n"
             "4. Quay lại kênh này, nhấn nút **Bắt Đầu** 🚀 và dán Token vào.\n"
             "5. Bot sẽ gửi tin nhắn riêng (DM) cập nhật tiến độ. Dùng lệnh `/my_quests` để nhận Gift Code khi hoàn thành!"
