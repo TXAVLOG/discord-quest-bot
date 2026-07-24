@@ -547,10 +547,10 @@ import typing
 
 # Slash Command: Set up channel
 @bot.tree.command(name="channel", description="[Admin] Cài đặt kênh hoạt động chính cho Bot và gửi Bảng điều khiển")
-@app_commands.describe(target_channel="Chọn kênh văn bản từ danh sách hoặc nhập ID/thẻ kênh (<#id>)")
+@app_commands.describe(target_channel="Chọn kênh văn bản đặt bảng điều khiển từ danh sách kênh Server")
 async def set_channel(
     interaction: discord.Interaction,
-    target_channel: typing.Union[discord.TextChannel, discord.Thread, discord.abc.GuildChannel, str]
+    target_channel: discord.abc.GuildChannel
 ):
     # Verify Admin permission
     if interaction.user.id not in config.ADMIN_IDS:
@@ -559,72 +559,27 @@ async def set_channel(
 
     await interaction.response.defer(ephemeral=True)
 
-    channel_obj = None
-    channel_id = None
-
-    if isinstance(target_channel, (discord.TextChannel, discord.Thread, discord.abc.GuildChannel)):
-        channel_obj = target_channel
-        channel_id = target_channel.id
-    elif hasattr(target_channel, "id"):
-        channel_id = target_channel.id
-        channel_obj = target_channel
-    else:
-        val_str = str(target_channel).strip()
-        import re
-        mention_match = re.match(r"^<#(\d+)>$", val_str)
-        if mention_match:
-            val_str = mention_match.group(1)
-
-        if val_str.isdigit():
-            channel_id = int(val_str)
-            if interaction.guild:
-                channel_obj = interaction.guild.get_channel(channel_id)
-            if not channel_obj:
-                try:
-                    channel_obj = await interaction.client.fetch_channel(channel_id)
-                except Exception:
-                    pass
-        elif interaction.guild:
-            clean_name = val_str.lstrip("#").lower()
-            for ch in interaction.guild.channels:
-                if ch.name.lower() == clean_name:
-                    channel_obj = ch
-                    channel_id = ch.id
-                    break
-
-    if not channel_id:
-        await interaction.followup.send("❌ **Không thể xác định kênh đã chọn trong máy chủ.** Vui lòng chọn một kênh hợp lệ!", ephemeral=True)
+    if not target_channel:
+        await interaction.followup.send("❌ **Không thể tìm thấy kênh đã chọn trong máy chủ.** Vui lòng chọn một kênh hợp lệ!", ephemeral=True)
         return
 
-    if not channel_obj:
-        try:
-            channel_obj = await interaction.client.fetch_channel(channel_id)
-        except Exception as e:
-            await interaction.followup.send(
-                f"❌ **Không thể truy cập kênh (ID: `{channel_id}`).**\n"
-                f"Vui lòng kiểm tra lại xem Bot đã có quyền **Xem Kênh (View Channel)** và **Gửi Tin Nhắn (Send Messages)** tại kênh đó chưa!\n"
-                f"Chi tiết lỗi: `{e}`",
-                ephemeral=True
-            )
-            return
-
     # Check if target channel can receive messages
-    if isinstance(channel_obj, discord.CategoryChannel) or not hasattr(channel_obj, "send"):
+    if isinstance(target_channel, discord.CategoryChannel) or not hasattr(target_channel, "send"):
         await interaction.followup.send(
-            f"❌ **Kênh `{getattr(channel_obj, 'name', channel_id)}` là Danh mục (Category) hoặc không hỗ trợ gửi tin nhắn!**\n"
+            f"❌ **Kênh `{getattr(target_channel, 'name', target_channel.id)}` là Danh mục (Category) hoặc không hỗ trợ gửi tin nhắn!**\n"
             f"Vui lòng chọn một kênh chat chữ (Text Channel) như `#general` hoặc `#quest-bot`.",
             ephemeral=True
         )
         return
 
     # Save to dynamic config
-    save_channel_config(channel_id)
+    save_channel_config(target_channel.id)
 
     # Recreate the control panel
     bot.control_msg_id = None
     await bot.update_control_panel()
 
-    channel_mention = channel_obj.mention if hasattr(channel_obj, "mention") else f"<#{channel_id}>"
+    channel_mention = getattr(target_channel, "mention", f"<#{target_channel.id}>")
     await interaction.followup.send(f"✅ **Đã thiết lập kênh hoạt động thành công tại:** {channel_mention}", ephemeral=True)
 
 
