@@ -517,33 +517,91 @@ async def on_app_command_error(interaction: discord.Interaction, error: app_comm
         log(f"Không thể gửi thông báo lỗi tới user: {e}", "warn")
 
 
+# Autocomplete for channel parameter
+async def channel_autocomplete(
+    interaction: discord.Interaction,
+    current: str
+) -> list[app_commands.Choice[str]]:
+    if not interaction.guild:
+        return []
+    
+    choices = []
+    current_lower = current.lower().lstrip("#")
+    for ch in interaction.guild.channels:
+        if hasattr(ch, "send") and not isinstance(ch, discord.CategoryChannel):
+            if not current_lower or current_lower in ch.name.lower() or current_lower in str(ch.id):
+                choices.append(app_commands.Choice(name=f"#{ch.name}", value=str(ch.id)))
+                if len(choices) >= 25:
+                    break
+    return choices
+
+
 # Slash Command: Set up channel
 @bot.tree.command(name="channel", description="[Admin] Cài đặt kênh hoạt động chính cho Bot và gửi Bảng điều khiển")
-@app_commands.describe(target_channel="Kênh văn bản muốn đặt bảng điều khiển")
-async def set_channel(interaction: discord.Interaction, target_channel: discord.abc.GuildChannel):
+@app_commands.describe(target_channel="Chọn kênh văn bản từ danh sách hoặc nhập tên/ID kênh")
+@app_commands.autocomplete(target_channel=channel_autocomplete)
+async def set_channel(interaction: discord.Interaction, target_channel: str):
     # Verify Admin permission
     if interaction.user.id not in config.ADMIN_IDS:
         await interaction.response.send_message("❌ **Bạn không có quyền thực hiện lệnh này!** Chỉ Admin được cấu hình mới có quyền.", ephemeral=True)
         return
 
-    # Check if target channel can receive messages
-    if not hasattr(target_channel, "send") or isinstance(target_channel, discord.CategoryChannel):
-        await interaction.response.send_message(
-            f"❌ **Kênh `{target_channel.name}` không hỗ trợ gửi tin nhắn!** Vui lòng chọn một kênh văn bản (Text Channel).",
+    await interaction.response.defer(ephemeral=True)
+
+    guild = interaction.guild
+    channel_obj = None
+    val = target_channel.strip()
+
+    # Case 1: Channel Mention (e.g., <#123456789012345678>)
+    import re
+    mention_match = re.match(r"^<#(\d+)>$", val)
+    if mention_match:
+        cid = int(mention_match.group(1))
+        channel_obj = guild.get_channel(cid) if guild else bot.get_channel(cid)
+
+    # Case 2: Channel ID (digits)
+    elif val.isdigit():
+        cid = int(val)
+        channel_obj = guild.get_channel(cid) if guild else bot.get_channel(cid)
+        if not channel_obj:
+            try:
+                channel_obj = await bot.fetch_channel(cid)
+            except Exception:
+                pass
+
+    # Case 3: Channel Name (e.g., "auto-quest", "setup-server", "#auto-quest")
+    else:
+        clean_name = val.lstrip("#").lower()
+        if guild:
+            for ch in guild.channels:
+                if ch.name.lower() == clean_name and hasattr(ch, "send") and not isinstance(ch, discord.CategoryChannel):
+                    channel_obj = ch
+                    break
+
+    if not channel_obj:
+        await interaction.followup.send(
+            f"❌ **Không tìm thấy kênh hợp lệ từ:** `{target_channel}`\n"
+            f"💡 **Mẹo:** Vui lòng chọn kênh từ danh sách gợi ý autocomplete hoặc nhập ID kênh (ví dụ: `1234567890`).",
             ephemeral=True
         )
         return
 
-    await interaction.response.defer(ephemeral=True)
+    if not hasattr(channel_obj, "send") or isinstance(channel_obj, discord.CategoryChannel):
+        await interaction.followup.send(
+            f"❌ **Kênh `{channel_obj.name}` (Danh mục/Forum) không hỗ trợ gửi tin nhắn!**\n"
+            f"Vui lòng chọn một kênh văn bản (Text Channel).",
+            ephemeral=True
+        )
+        return
 
     # Save to dynamic config
-    save_channel_config(target_channel.id)
+    save_channel_config(channel_obj.id)
 
     # Recreate the control panel
     bot.control_msg_id = None
     await bot.update_control_panel()
 
-    await interaction.followup.send(f"✅ **Đã thiết lập kênh hoạt động thành công tại:** {target_channel.mention}", ephemeral=True)
+    await interaction.followup.send(f"✅ **Đã thiết lập kênh hoạt động thành công tại:** {channel_obj.mention}", ephemeral=True)
 
 
 # Slash Command: Start/Join guide (slash command)
