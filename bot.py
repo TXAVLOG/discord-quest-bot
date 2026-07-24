@@ -479,6 +479,45 @@ class QuestBot(commands.Bot):
         except Exception as e:
             log(f"Lỗi sync slash commands: {e}", "error")
 
+    async def on_guild_join(self, guild: discord.Guild):
+        """Tự động xử lý khi Bot được mời vào một Server mới."""
+        log(f"🎉 Bot vừa được thêm vào máy chủ mới: {guild.name} (ID: {guild.id})", "ok")
+        
+        # 1. Tự động sync slash commands sang Server mới ngay lập tức
+        try:
+            await self.tree.sync(guild=guild)
+            log(f"Đã sync slash commands tới guild mới: {guild.name}", "ok")
+        except Exception as e:
+            log(f"Lỗi sync slash commands tới guild mới: {e}", "warn")
+
+        # 2. Tìm kênh văn bản thích hợp nhất để tạo Bảng điều khiển
+        target_channel = guild.system_channel
+        if not target_channel or not hasattr(target_channel, "permissions_for") or not target_channel.permissions_for(guild.me).send_messages:
+            for ch in guild.text_channels:
+                if ch.permissions_for(guild.me).send_messages and ch.permissions_for(guild.me).view_channel:
+                    target_channel = ch
+                    break
+
+        if target_channel:
+            # Lưu kênh làm kênh hoạt động chính của Server
+            save_channel_config(target_channel.id, guild_id=guild.id)
+            
+            # Gửi tin nhắn chào mừng và Bảng điều khiển
+            try:
+                welcome_embed = discord.Embed(
+                    title="🎉 Cảm ơn bạn đã thêm Quest Bot!",
+                    description=(
+                        f"Bot đã sẵn sàng hoạt động tại máy chủ **{guild.name}**!\n\n"
+                        f"📍 **Kênh hoạt động tự động:** {target_channel.mention}\n"
+                        f"⚙️ **Admin có thể đổi kênh hoạt động bất cứ lúc nào bằng lệnh:** `/setup_here` hoặc `/channel`"
+                    ),
+                    color=discord.Color.green()
+                )
+                await target_channel.send(embed=welcome_embed)
+                await self.update_control_panel(target_channel=target_channel)
+            except Exception as e:
+                log(f"Không thể gửi tin nhắn chào mừng tại guild {guild.id}: {e}", "warn")
+
     async def update_control_panel(self, target_channel=None):
         """Creates or updates the main statistics control panel embed across configured server channels."""
         channels_to_update = []
@@ -679,6 +718,51 @@ async def setup_here(interaction: discord.Interaction):
 
     channel_mention = getattr(target_channel, "mention", f"<#{target_channel.id}>")
     await interaction.followup.send(f"✅ **Đã thiết lập Bảng điều khiển thành công NGAY tại kênh:** {channel_mention}", ephemeral=True)
+
+
+def get_bot_invite_url(bot):
+    permissions = discord.Permissions(
+        view_channel=True,
+        send_messages=True,
+        embed_links=True,
+        attach_files=True,
+        read_message_history=True,
+        use_external_emojis=True,
+        manage_messages=True,
+        manage_channels=True
+    )
+    return discord.utils.oauth_url(
+        bot.user.id,
+        permissions=permissions,
+        scopes=("bot", "applications.commands")
+    )
+
+
+# Slash Command: Get Bot Invite Link
+@bot.tree.command(name="invite", description="Lấy link mời Quest Bot vào máy chủ (Server) Discord của bạn")
+async def invite_bot(interaction: discord.Interaction):
+    invite_url = get_bot_invite_url(bot)
+    
+    embed = discord.Embed(
+        title="➕ Thêm Quest Bot Vào Server Của Bạn",
+        description=(
+            "Nhấn nút bên dưới để mời Bot tham gia máy chủ Discord của bạn.\n\n"
+            "✨ **Khi Bot tham gia Server mới:**\n"
+            "• Bot sẽ tự động tìm kênh và tạo **Bảng điều khiển** tự động.\n"
+            "• Admin có thể dùng lệnh `/setup_here` tại bất kỳ kênh nào để đổi kênh hoạt động."
+        ),
+        color=discord.Color.blue()
+    )
+    
+    view = discord.ui.View()
+    view.add_item(discord.ui.Button(
+        label="Mời Bot Vào Server",
+        style=discord.ButtonStyle.link,
+        url=invite_url,
+        emoji="➕"
+    ))
+    
+    await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
 
 # Slash Command: Start/Join guide (slash command)
