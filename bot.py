@@ -479,62 +479,83 @@ class QuestBot(commands.Bot):
         except Exception as e:
             log(f"Lỗi sync slash commands: {e}", "error")
 
-    async def update_control_panel(self, target_channel_id=None):
+    async def update_control_panel(self, target_channel=None):
         """Creates or updates the main statistics control panel embed across configured server channels."""
-        channels_to_update = set()
-        if target_channel_id:
-            channels_to_update.add(target_channel_id)
+        channels_to_update = []
+        seen_ids = set()
+
+        if target_channel:
+            if isinstance(target_channel, (discord.TextChannel, discord.Thread, discord.abc.GuildChannel)) or hasattr(target_channel, "send"):
+                channels_to_update.append(target_channel)
+                seen_ids.add(target_channel.id)
+            elif isinstance(target_channel, (int, str)) and str(target_channel).isdigit():
+                seen_ids.add(int(target_channel))
+
         if config.CHANNEL_ID:
-            channels_to_update.add(config.CHANNEL_ID)
+            seen_ids.add(config.CHANNEL_ID)
         if hasattr(config, 'SERVER_CHANNELS') and config.SERVER_CHANNELS:
             for cid in config.SERVER_CHANNELS.values():
-                channels_to_update.add(cid)
+                seen_ids.add(cid)
+
+        # Resolve channel objects for any channel IDs not resolved yet
+        for cid in seen_ids:
+            if any(getattr(ch, 'id', None) == cid for ch in channels_to_update):
+                continue
+
+            ch = self.get_channel(cid)
+            if not ch:
+                for guild in self.guilds:
+                    ch = guild.get_channel(cid)
+                    if ch:
+                        break
+            if not ch:
+                try:
+                    ch = await self.fetch_channel(cid)
+                except Exception as fetch_err:
+                    log(f"Chưa thể kết nối tới kênh ID {cid}: {fetch_err}", "warn")
+                    continue
+            if ch:
+                channels_to_update.append(ch)
 
         if not channels_to_update:
             log("Chưa cấu hình kênh hoạt động nào. Chờ admin sử dụng lệnh /channel hoặc /setup_here.", "warn")
             return
 
-        for cid in channels_to_update:
-            channel = self.get_channel(cid)
-            if not channel:
+        for channel in channels_to_update:
+            try:
+                embed = discord.Embed(
+                    title="🎯 Tự Động Hoàn Thành Quest Discord",
+                    description=(
+                        "Nhận **Nitro, avatar, profile decoration...** mà không cần thao tác thủ công.\n"
+                        "Nhấn 🚀 **Bắt Đầu** để nhập token — hệ thống sẽ tự **quét • nhận • hoàn thành** quest cho bạn."
+                    ),
+                    color=discord.Color.blue()
+                )
+                embed.set_author(name="TXA")
+                
+                active_count = len(config.ACTIVE_USERS)
+                embed.add_field(name="👤 Phiên hiện tại", value=f"```\n{active_count}\n```", inline=True)
+                embed.add_field(name="⏳ Hàng chờ", value="```\n0\n```", inline=True)
+                embed.add_field(name="▶️ Đang chạy", value=f"```\n{active_count}\n```", inline=True)
+                embed.add_field(name="✅ Tổng quest đã hoàn thành", value=f"```\n{config.TOTAL_COMPLETED}\n```", inline=False)
+                
+                current_time = time.strftime("%H:%M %d/%m/%y")
+                embed.set_footer(text=f"Auto Scan • Auto Accept • Auto Complete • {current_time} | Quest Bot v4.0 - Built by TXA")
+
+                # Clean old bot messages and send a clean panel
                 try:
-                    channel = await self.fetch_channel(cid)
-                except Exception:
-                    log(f"Không tìm thấy kênh với ID {cid}", "error")
-                    continue
+                    async for msg in channel.history(limit=15):
+                        if msg.author == self.user:
+                            await msg.delete()
+                except Exception as e:
+                    log(f"Lỗi dọn dẹp tin nhắn cũ ở kênh {getattr(channel, 'id', 'unknown')}: {e}", "warn")
 
-            # Prepare embed content
-            embed = discord.Embed(
-                title="🎯 Tự Động Hoàn Thành Quest Discord",
-                description=(
-                    "Nhận **Nitro, avatar, profile decoration...** mà không cần thao tác thủ công.\n"
-                    "Nhấn 🚀 **Bắt Đầu** để nhập token — hệ thống sẽ tự **quét • nhận • hoàn thành** quest cho bạn."
-                ),
-                color=discord.Color.blue()
-            )
-            embed.set_author(name="TXA")
-            
-            active_count = len(config.ACTIVE_USERS)
-            embed.add_field(name="👤 Phiên hiện tại", value=f"```\n{active_count}\n```", inline=True)
-            embed.add_field(name="⏳ Hàng chờ", value="```\n0\n```", inline=True)
-            embed.add_field(name="▶️ Đang chạy", value=f"```\n{active_count}\n```", inline=True)
-            embed.add_field(name="✅ Tổng quest đã hoàn thành", value=f"```\n{config.TOTAL_COMPLETED}\n```", inline=False)
-            
-            current_time = time.strftime("%H:%M %d/%m/%y")
-            embed.set_footer(text=f"Auto Scan • Auto Accept • Auto Complete • {current_time} | Quest Bot v4.0 - Built by TXA")
-
-            # Clean old bot messages and send a clean panel
-            try:
-                async for msg in channel.history(limit=15):
-                    if msg.author == self.user:
-                        await msg.delete()
+                try:
+                    await channel.send(embed=embed, view=ControlView(self))
+                except Exception as e:
+                    log(f"Không thể gửi tin nhắn bảng điều khiển tới kênh {getattr(channel, 'id', 'unknown')}: {e}", "error")
             except Exception as e:
-                log(f"Lỗi dọn dẹp tin nhắn cũ ở kênh {cid}: {e}", "warn")
-
-            try:
-                await channel.send(embed=embed, view=ControlView(self))
-            except Exception as e:
-                log(f"Không thể gửi tin nhắn bảng điều khiển tới kênh {cid}: {e}", "error")
+                log(f"Lỗi khi xử lý kênh {getattr(channel, 'id', 'unknown')}: {e}", "error")
 
 
 bot = QuestBot()
@@ -570,7 +591,7 @@ async def set_channel(
 ):
     # Verify Admin permission
     if interaction.user.id not in config.ADMIN_IDS:
-        await interaction.response.send_message("❌ **Bạn không có quyền thực hiện lệnh me!** Chỉ Admin được cấu hình mới có quyền.", ephemeral=True)
+        await interaction.response.send_message("❌ **Bạn không có quyền thực hiện lệnh này!** Chỉ Admin được cấu hình mới có quyền.", ephemeral=True)
         return
 
     await interaction.response.defer(ephemeral=True)
@@ -593,7 +614,7 @@ async def set_channel(
     save_channel_config(target_channel.id, guild_id=guild_id)
 
     # Recreate the control panel for this channel
-    await bot.update_control_panel(target_channel_id=target_channel.id)
+    await bot.update_control_panel(target_channel=target_channel)
 
     channel_mention = getattr(target_channel, "mention", f"<#{target_channel.id}>")
     await interaction.followup.send(f"✅ **Đã thiết lập kênh hoạt động thành công tại:** {channel_mention}", ephemeral=True)
@@ -617,7 +638,7 @@ async def setup_here(interaction: discord.Interaction):
     guild_id = interaction.guild_id if interaction.guild else None
     save_channel_config(target_channel.id, guild_id=guild_id)
 
-    await bot.update_control_panel(target_channel_id=target_channel.id)
+    await bot.update_control_panel(target_channel=target_channel)
 
     channel_mention = getattr(target_channel, "mention", f"<#{target_channel.id}>")
     await interaction.followup.send(f"✅ **Đã thiết lập Bảng điều khiển thành công NGAY tại kênh:** {channel_mention}", ephemeral=True)
