@@ -499,13 +499,39 @@ class QuestBot(commands.Bot):
 bot = QuestBot()
 
 
+@bot.tree.error
+async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
+    log(f"Lỗi lệnh slash [{interaction.command.name if interaction.command else 'Unknown'}]: {error}", "error")
+    
+    if isinstance(error, app_commands.TransformerError):
+        msg = f"❌ **Lỗi dữ liệu kênh/tham số:** `{error.value}` không phải là kênh hợp lệ hoặc không thể sử dụng cho lệnh này."
+    else:
+        msg = f"❌ **Có lỗi xảy ra khi thực hiện lệnh:** `{error}`"
+
+    try:
+        if interaction.response.is_done():
+            await interaction.followup.send(msg, ephemeral=True)
+        else:
+            await interaction.response.send_message(msg, ephemeral=True)
+    except Exception as e:
+        log(f"Không thể gửi thông báo lỗi tới user: {e}", "warn")
+
+
 # Slash Command: Set up channel
 @bot.tree.command(name="channel", description="[Admin] Cài đặt kênh hoạt động chính cho Bot và gửi Bảng điều khiển")
 @app_commands.describe(target_channel="Kênh văn bản muốn đặt bảng điều khiển")
-async def set_channel(interaction: discord.Interaction, target_channel: discord.TextChannel):
+async def set_channel(interaction: discord.Interaction, target_channel: discord.abc.GuildChannel):
     # Verify Admin permission
     if interaction.user.id not in config.ADMIN_IDS:
         await interaction.response.send_message("❌ **Bạn không có quyền thực hiện lệnh này!** Chỉ Admin được cấu hình mới có quyền.", ephemeral=True)
+        return
+
+    # Check if target channel can receive messages
+    if not hasattr(target_channel, "send") or isinstance(target_channel, discord.CategoryChannel):
+        await interaction.response.send_message(
+            f"❌ **Kênh `{target_channel.name}` không hỗ trợ gửi tin nhắn!** Vui lòng chọn một kênh văn bản (Text Channel).",
+            ephemeral=True
+        )
         return
 
     await interaction.response.defer(ephemeral=True)
