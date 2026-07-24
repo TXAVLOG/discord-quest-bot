@@ -1088,51 +1088,9 @@ class QuestClaimView(discord.ui.View):
 
 
 # Command: Help command (slash command)
-@bot.tree.command(name="help", description="Xem hướng dẫn sử dụng và danh sách các lệnh của Bot")
+@bot.tree.command(name="help", description="Xem hướng dẫn sử dụng và tải tiện ích TXA Discord Token Retriever (.crx)")
 async def help_command(interaction: discord.Interaction):
-    embed = discord.Embed(
-        title="🤖 HƯỚNG DẪN SỬ DỤNG QUEST BOT 🤖",
-        color=discord.Color.from_rgb(114, 137, 218),  # Discord Blurple
-        description=(
-            "Chào mừng bạn đến với **Quest Bot v4.0**! Hệ thống hỗ trợ tự động hóa "
-            "quá trình làm Quest của Discord để nhận quà tặng cực kỳ tiện lợi.\n\n"
-            "Để bắt đầu, hãy xem qua các lệnh có sẵn bên dưới."
-        )
-    )
-    embed.add_field(
-        name="👤 Lệnh Người Dùng (User Commands)",
-        value=(
-            "• **`/help`**: Hiển thị bảng hướng dẫn này.\n"
-            "• **`/my_quests`**: Kiểm tra tiến độ và danh sách quest hiện tại của bạn. Đính kèm nút nhận mã quà tặng (Gift Code) khi quest hoàn thành.\n"
-            "• **`/user_info`**: Xem thông tin tài khoản Discord đang chạy quest của bạn.\n"
-            "• **`/stop_my_session`**: Dừng ngay lập trình chạy tự động của tài khoản của bạn."
-        ),
-        inline=False
-    )
-    embed.add_field(
-        name="⚙️ Lệnh Quản Trị (Admin Commands)",
-        value=(
-            "• **`/channel`**: Thiết lập kênh hoạt động chính cho bot và tạo bảng điều khiển.\n"
-            "• **`/status`**: Xem danh sách các phiên hoạt động và hiệu suất hệ thống.\n"
-            "• **`/config`**: Xem chi tiết toàn bộ cấu hình hệ thống hiện tại của Bot.\n"
-            "• **`/stop_user`**: Dừng phiên chạy của một người dùng thông qua ID Discord.\n"
-            "• **`/system_stats`**: Xem chi tiết hiệu năng phần cứng máy chủ chạy bot."
-        ),
-        inline=False
-    )
-    embed.add_field(
-        name="🚀 Hướng Dẫn Nhanh",
-        value=(
-            "1. Di chuyển đến kênh hoạt động được Admin thiết lập.\n"
-            "2. Nhấn nút **Hướng Dẫn** ❓ → Tải file tiện ích `TXA_Discord_Token_Retriever.crx` và kéo thả vào Chrome/Edge (bật Developer mode).\n"
-            "3. Vào [discord.com](https://discord.com), bấm vào icon tiện ích → **Side Panel** hiện ra bên phải → Bấm **Lấy & Sao Chép Token**.\n"
-            "4. Quay lại kênh này, nhấn nút **Bắt Đầu** 🚀 và dán Token vào.\n"
-            "5. Bot sẽ gửi tin nhắn riêng (DM) cập nhật tiến độ. Dùng lệnh `/my_quests` để nhận Gift Code khi hoàn thành!"
-        ),
-        inline=False
-    )
-    embed.set_footer(text="Quest Bot v4.0 • Thiết kế bởi TXA")
-    await interaction.response.send_message(embed=embed, ephemeral=True)
+    await send_extension_guide(interaction)
 
 
 # Command: View active user quests (slash command)
