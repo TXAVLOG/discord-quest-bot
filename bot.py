@@ -558,6 +558,26 @@ class QuestBot(commands.Bot):
                 log(f"Lỗi khi xử lý kênh {getattr(channel, 'id', 'unknown')}: {e}", "error")
 
 
+def check_bot_channel_permissions(channel, me):
+    """Kiểm tra xem Bot có đủ quyền hạn tại kênh chỉ định hay không."""
+    if not me or not hasattr(channel, "permissions_for"):
+        return True, ""
+    perms = channel.permissions_for(me)
+    missing = []
+    if not perms.view_channel:
+        missing.append("👁️ **Xem Kênh** (View Channel / Read Messages)")
+    if not perms.send_messages:
+        missing.append("💬 **Gửi Tin Nhắn** (Send Messages)")
+    if not perms.embed_links:
+        missing.append("🔗 **Chèn Liên Kết** (Embed Links)")
+    if not perms.read_message_history:
+        missing.append("📜 **Đọc Lịch Sử Tin Nhắn** (Read Message History)")
+    
+    if missing:
+        return False, "\n".join([f"• {m}" for m in missing])
+    return True, ""
+
+
 bot = QuestBot()
 
 
@@ -582,12 +602,12 @@ async def on_app_command_error(interaction: discord.Interaction, error: app_comm
 import typing
 
 
-# Slash Command: Set up channel by selecting channel
-@bot.tree.command(name="channel", description="[Admin] Cài đặt kênh hoạt động chính cho Bot và gửi Bảng điều khiển")
-@app_commands.describe(target_channel="Chọn kênh văn bản đặt bảng điều khiển từ danh sách kênh Server")
+# Slash Command: Set up channel by selecting channel or current channel
+@bot.tree.command(name="channel", description="[Admin] Cài đặt kênh hoạt động cho Bot (để trống sẽ lấy kênh hiện tại)")
+@app_commands.describe(target_channel="(Tuỳ chọn) Chọn kênh văn bản từ danh sách. Để trống sẽ lấy kênh bạn đang đứng.")
 async def set_channel(
     interaction: discord.Interaction,
-    target_channel: discord.abc.GuildChannel
+    target_channel: typing.Optional[discord.TextChannel] = None
 ):
     # Verify Admin permission
     if interaction.user.id not in config.ADMIN_IDS:
@@ -596,27 +616,32 @@ async def set_channel(
 
     await interaction.response.defer(ephemeral=True)
 
-    if not target_channel:
-        await interaction.followup.send("❌ **Không thể tìm thấy kênh đã chọn trong máy chủ.** Vui lòng chọn một kênh hợp lệ!", ephemeral=True)
+    channel = target_channel or interaction.channel
+
+    if not channel or not hasattr(channel, "send"):
+        await interaction.followup.send("❌ **Không thể xác định kênh văn bản hợp lệ!** Vui lòng thực hiện lệnh trong một kênh chat chữ.", ephemeral=True)
         return
 
-    # Check if target channel can receive messages
-    if isinstance(target_channel, discord.CategoryChannel) or not hasattr(target_channel, "send"):
+    # Check bot permissions in target channel
+    me = interaction.guild.me if interaction.guild else None
+    has_perms, missing_str = check_bot_channel_permissions(channel, me)
+    if not has_perms:
         await interaction.followup.send(
-            f"❌ **Kênh `{getattr(target_channel, 'name', target_channel.id)}` là Danh mục (Category) hoặc không hỗ trợ gửi tin nhắn!**\n"
-            f"Vui lòng chọn một kênh chat chữ (Text Channel) như `#general` hoặc `#quest-bot`.",
+            f"❌ **Bot không có đủ quyền hạn tại kênh {getattr(channel, 'mention', channel.name)}!**\n\n"
+            f"Vui lòng vào **Cài đặt kênh ➔ Quyền (Permissions)** và cấp cho Bot/Vai trò của Bot các quyền sau:\n"
+            f"{missing_str}",
             ephemeral=True
         )
         return
 
     # Save to dynamic config for this specific server guild
     guild_id = interaction.guild_id if interaction.guild else None
-    save_channel_config(target_channel.id, guild_id=guild_id)
+    save_channel_config(channel.id, guild_id=guild_id)
 
     # Recreate the control panel for this channel
-    await bot.update_control_panel(target_channel=target_channel)
+    await bot.update_control_panel(target_channel=channel)
 
-    channel_mention = getattr(target_channel, "mention", f"<#{target_channel.id}>")
+    channel_mention = getattr(channel, "mention", f"<#{channel.id}>")
     await interaction.followup.send(f"✅ **Đã thiết lập kênh hoạt động thành công tại:** {channel_mention}", ephemeral=True)
 
 
@@ -633,6 +658,18 @@ async def setup_here(interaction: discord.Interaction):
     target_channel = interaction.channel
     if not target_channel or not hasattr(target_channel, "send"):
         await interaction.followup.send("❌ **Kênh hiện tại không hỗ trợ gửi tin nhắn!**", ephemeral=True)
+        return
+
+    # Check bot permissions in target channel
+    me = interaction.guild.me if interaction.guild else None
+    has_perms, missing_str = check_bot_channel_permissions(target_channel, me)
+    if not has_perms:
+        await interaction.followup.send(
+            f"❌ **Bot không có đủ quyền hạn tại kênh {getattr(target_channel, 'mention', target_channel.name)}!**\n\n"
+            f"Vui lòng vào **Cài đặt kênh ➔ Quyền (Permissions)** và cấp cho Bot các quyền sau:\n"
+            f"{missing_str}",
+            ephemeral=True
+        )
         return
 
     guild_id = interaction.guild_id if interaction.guild else None
