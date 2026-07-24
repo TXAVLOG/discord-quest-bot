@@ -1346,6 +1346,13 @@ async def set_timeout(interaction: discord.Interaction, minutes: int):
 
 
 def run_bot():
+    if os.environ.get("TXA_LAUNCHED") != "1":
+        log("=" * 65, "error")
+        log("❌ BẠN KHÔNG THỂ CHẠY TRỰC TIẾP TỆP BOT.PY!", "error")
+        log("👉 Vui lòng khởi động Bot bằng tệp chính quy: python txa.py", "warn")
+        log("=" * 65, "error")
+        sys.exit(1)
+
     missing = []
     
     token = config.BOT_TOKEN.strip()
@@ -1380,4 +1387,8 @@ def run_bot():
         log("Đã nhận tín hiệu Ctrl+C. Hệ thống đang tắt...", "warn")
 
 if __name__ == "__main__":
-    run_bot()
+    log("=" * 65, "error")
+    log("❌ BẠN KHÔNG THỂ CHẠY TRỰC TIẾP TỆP BOT.PY!", "error")
+    log("👉 Vui lòng khởi động Bot bằng tệp chính quy: python txa.py", "warn")
+    log("=" * 65, "error")
+    sys.exit(1)
