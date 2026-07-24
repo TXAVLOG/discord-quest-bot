@@ -545,53 +545,12 @@ async def on_app_command_error(interaction: discord.Interaction, error: app_comm
 import typing
 
 
-class CustomChannelTransformer(app_commands.Transformer):
-    @property
-    def type(self) -> discord.AppCommandOptionType:
-        return discord.AppCommandOptionType.channel
-
-    async def transform(self, interaction: discord.Interaction, value: typing.Any) -> typing.Optional[discord.abc.GuildChannel]:
-        if isinstance(value, discord.abc.GuildChannel):
-            return value
-
-        guild = interaction.guild
-        if not guild:
-            return None
-
-        val_str = str(value).strip()
-
-        # Handle channel mention <#1234567890>
-        import re
-        mention_match = re.match(r"^<#(\d+)>$", val_str)
-        if mention_match:
-            val_str = mention_match.group(1)
-
-        # ID lookup
-        if val_str.isdigit():
-            cid = int(val_str)
-            ch = guild.get_channel(cid)
-            if ch:
-                return ch
-            try:
-                return await guild.fetch_channel(cid)
-            except Exception:
-                pass
-
-        # Name lookup
-        clean_name = val_str.lstrip("#").lower()
-        for ch in guild.channels:
-            if ch.name.lower() == clean_name:
-                return ch
-
-        return None
-
-
 # Slash Command: Set up channel
 @bot.tree.command(name="channel", description="[Admin] Cài đặt kênh hoạt động chính cho Bot và gửi Bảng điều khiển")
-@app_commands.describe(target_channel="Chọn kênh văn bản đặt bảng điều khiển từ danh sách kênh Server")
+@app_commands.describe(target_channel="Chọn kênh văn bản từ danh sách hoặc nhập ID/thẻ kênh (<#id>)")
 async def set_channel(
     interaction: discord.Interaction,
-    target_channel: app_commands.Transform[discord.abc.GuildChannel, CustomChannelTransformer]
+    target_channel: typing.Union[discord.TextChannel, discord.Thread, discord.abc.GuildChannel, str]
 ):
     # Verify Admin permission
     if interaction.user.id not in config.ADMIN_IDS:
@@ -600,27 +559,73 @@ async def set_channel(
 
     await interaction.response.defer(ephemeral=True)
 
-    if not target_channel:
-        await interaction.followup.send("❌ **Không thể tìm thấy kênh đã chọn trong máy chủ.**", ephemeral=True)
+    channel_obj = None
+    channel_id = None
+
+    if isinstance(target_channel, (discord.TextChannel, discord.Thread, discord.abc.GuildChannel)):
+        channel_obj = target_channel
+        channel_id = target_channel.id
+    elif hasattr(target_channel, "id"):
+        channel_id = target_channel.id
+        channel_obj = target_channel
+    else:
+        val_str = str(target_channel).strip()
+        import re
+        mention_match = re.match(r"^<#(\d+)>$", val_str)
+        if mention_match:
+            val_str = mention_match.group(1)
+
+        if val_str.isdigit():
+            channel_id = int(val_str)
+            if interaction.guild:
+                channel_obj = interaction.guild.get_channel(channel_id)
+            if not channel_obj:
+                try:
+                    channel_obj = await interaction.client.fetch_channel(channel_id)
+                except Exception:
+                    pass
+        elif interaction.guild:
+            clean_name = val_str.lstrip("#").lower()
+            for ch in interaction.guild.channels:
+                if ch.name.lower() == clean_name:
+                    channel_obj = ch
+                    channel_id = ch.id
+                    break
+
+    if not channel_id:
+        await interaction.followup.send("❌ **Không thể xác định kênh đã chọn trong máy chủ.** Vui lòng chọn một kênh hợp lệ!", ephemeral=True)
         return
 
+    if not channel_obj:
+        try:
+            channel_obj = await interaction.client.fetch_channel(channel_id)
+        except Exception as e:
+            await interaction.followup.send(
+                f"❌ **Không thể truy cập kênh (ID: `{channel_id}`).**\n"
+                f"Vui lòng kiểm tra lại xem Bot đã có quyền **Xem Kênh (View Channel)** và **Gửi Tin Nhắn (Send Messages)** tại kênh đó chưa!\n"
+                f"Chi tiết lỗi: `{e}`",
+                ephemeral=True
+            )
+            return
+
     # Check if target channel can receive messages
-    if isinstance(target_channel, discord.CategoryChannel) or not hasattr(target_channel, "send"):
+    if isinstance(channel_obj, discord.CategoryChannel) or not hasattr(channel_obj, "send"):
         await interaction.followup.send(
-            f"❌ **Kênh `{target_channel.name}` là Danh mục (Category) hoặc không hỗ trợ gửi tin nhắn!**\n"
+            f"❌ **Kênh `{getattr(channel_obj, 'name', channel_id)}` là Danh mục (Category) hoặc không hỗ trợ gửi tin nhắn!**\n"
             f"Vui lòng chọn một kênh chat chữ (Text Channel) như `#general` hoặc `#quest-bot`.",
             ephemeral=True
         )
         return
 
     # Save to dynamic config
-    save_channel_config(target_channel.id)
+    save_channel_config(channel_id)
 
     # Recreate the control panel
     bot.control_msg_id = None
     await bot.update_control_panel()
 
-    await interaction.followup.send(f"✅ **Đã thiết lập kênh hoạt động thành công tại:** {target_channel.mention}", ephemeral=True)
+    channel_mention = channel_obj.mention if hasattr(channel_obj, "mention") else f"<#{channel_id}>"
+    await interaction.followup.send(f"✅ **Đã thiết lập kênh hoạt động thành công tại:** {channel_mention}", ephemeral=True)
 
 
 # Slash Command: Start/Join guide (slash command)
