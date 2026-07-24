@@ -34,21 +34,31 @@ bot_start_time = time.time()
 CONFIG_FILE = "channel.json"
 
 def load_channel_config():
+    if not hasattr(config, 'SERVER_CHANNELS'):
+        config.SERVER_CHANNELS = {}
     if os.path.exists(CONFIG_FILE):
         try:
             with open(CONFIG_FILE, "r") as f:
                 data = json.load(f)
                 config.CHANNEL_ID = data.get("channel_id")
-                log(f"Đã tải cấu hình kênh hoạt động từ file: {config.CHANNEL_ID}", "ok")
+                config.SERVER_CHANNELS = data.get("server_channels", {})
+                log(f"Đã tải cấu hình kênh hoạt động: default={config.CHANNEL_ID}, servers={len(config.SERVER_CHANNELS)}", "ok")
         except Exception as e:
             log(f"Không thể tải cấu hình kênh: {e}", "warn")
 
-def save_channel_config(channel_id):
+def save_channel_config(channel_id, guild_id=None):
     try:
+        if not hasattr(config, 'SERVER_CHANNELS'):
+            config.SERVER_CHANNELS = {}
         config.CHANNEL_ID = channel_id
+        if guild_id:
+            config.SERVER_CHANNELS[str(guild_id)] = channel_id
         with open(CONFIG_FILE, "w") as f:
-            json.dump({"channel_id": channel_id}, f)
-        log(f"Đã lưu cấu hình kênh hoạt động mới: {channel_id}", "ok")
+            json.dump({
+                "channel_id": channel_id,
+                "server_channels": config.SERVER_CHANNELS
+            }, f, indent=2)
+        log(f"Đã lưu cấu hình kênh hoạt động mới: {channel_id} (Guild: {guild_id})", "ok")
     except Exception as e:
         log(f"Không thể lưu cấu hình kênh: {e}", "error")
 
@@ -391,8 +401,13 @@ class ControlView(discord.ui.View):
 
     @discord.ui.button(label="Bắt Đầu", style=discord.ButtonStyle.success, emoji="🚀", custom_id="btn_start")
     async def start_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # Only allow clicks in the configured channel
-        if config.CHANNEL_ID and interaction.channel_id != config.CHANNEL_ID:
+        allowed_channels = set()
+        if config.CHANNEL_ID:
+            allowed_channels.add(config.CHANNEL_ID)
+        if hasattr(config, 'SERVER_CHANNELS') and config.SERVER_CHANNELS:
+            allowed_channels.update(config.SERVER_CHANNELS.values())
+            
+        if allowed_channels and interaction.channel_id not in allowed_channels:
             await interaction.response.send_message("❌ Nút bấm này không thể sử dụng ở kênh này.", ephemeral=True)
             return
         
@@ -401,7 +416,13 @@ class ControlView(discord.ui.View):
 
     @discord.ui.button(label="Hướng Dẫn", style=discord.ButtonStyle.secondary, emoji="❓", custom_id="btn_guide")
     async def guide_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if config.CHANNEL_ID and interaction.channel_id != config.CHANNEL_ID:
+        allowed_channels = set()
+        if config.CHANNEL_ID:
+            allowed_channels.add(config.CHANNEL_ID)
+        if hasattr(config, 'SERVER_CHANNELS') and config.SERVER_CHANNELS:
+            allowed_channels.update(config.SERVER_CHANNELS.values())
+
+        if allowed_channels and interaction.channel_id not in allowed_channels:
             await interaction.response.send_message("❌ Nút bấm này không thể sử dụng ở kênh này.", ephemeral=True)
             return
         
@@ -458,67 +479,62 @@ class QuestBot(commands.Bot):
         except Exception as e:
             log(f"Lỗi sync slash commands: {e}", "error")
 
-    async def update_control_panel(self):
-        """Creates or updates the main statistics control panel embed."""
-        if not config.CHANNEL_ID:
-            log("Chưa cấu hình CHANNEL_ID. Chờ admin sử dụng lệnh /channel.", "warn")
+    async def update_control_panel(self, target_channel_id=None):
+        """Creates or updates the main statistics control panel embed across configured server channels."""
+        channels_to_update = set()
+        if target_channel_id:
+            channels_to_update.add(target_channel_id)
+        if config.CHANNEL_ID:
+            channels_to_update.add(config.CHANNEL_ID)
+        if hasattr(config, 'SERVER_CHANNELS') and config.SERVER_CHANNELS:
+            for cid in config.SERVER_CHANNELS.values():
+                channels_to_update.add(cid)
+
+        if not channels_to_update:
+            log("Chưa cấu hình kênh hoạt động nào. Chờ admin sử dụng lệnh /channel hoặc /setup_here.", "warn")
             return
 
-        channel = self.get_channel(config.CHANNEL_ID)
-        if not channel:
-            try:
-                channel = await self.fetch_channel(config.CHANNEL_ID)
-            except Exception:
-                log(f"Không tìm thấy kênh với ID {config.CHANNEL_ID}", "error")
-                return
+        for cid in channels_to_update:
+            channel = self.get_channel(cid)
+            if not channel:
+                try:
+                    channel = await self.fetch_channel(cid)
+                except Exception:
+                    log(f"Không tìm thấy kênh với ID {cid}", "error")
+                    continue
 
-        # Prepare embed content exactly like the reference image
-        embed = discord.Embed(
-            title="🎯 Tự Động Hoàn Thành Quest Discord",
-            description=(
-                "Nhận **Nitro, avatar, profile decoration...** mà không cần thao tác thủ công.\n"
-                "Nhấn 🚀 **Bắt Đầu** để nhập token — hệ thống sẽ tự **quét • nhận • hoàn thành** quest cho bạn."
-            ),
-            color=discord.Color.blue()
-        )
-        embed.set_author(name="TXA")
-        
-        # Status details in boxed codeblocks
-        active_count = len(config.ACTIVE_USERS)
-        embed.add_field(name="👤 Phiên hiện tại", value=f"```\n{active_count}\n```", inline=True)
-        embed.add_field(name="⏳ Hàng chờ", value="```\n0\n```", inline=True)
-        embed.add_field(name="▶️ Đang chạy", value=f"```\n{active_count}\n```", inline=True)
-        embed.add_field(name="✅ Tổng quest đã hoàn thành", value=f"```\n{config.TOTAL_COMPLETED}\n```", inline=False)
-        
-        # Footer combining status and copyright
-        current_time = time.strftime("%H:%M %d/%m/%y")
-        embed.set_footer(text=f"Auto Scan • Auto Accept • Auto Complete • {current_time} | Quest Bot v4.0 - Built by TXA")
+            # Prepare embed content
+            embed = discord.Embed(
+                title="🎯 Tự Động Hoàn Thành Quest Discord",
+                description=(
+                    "Nhận **Nitro, avatar, profile decoration...** mà không cần thao tác thủ công.\n"
+                    "Nhấn 🚀 **Bắt Đầu** để nhập token — hệ thống sẽ tự **quét • nhận • hoàn thành** quest cho bạn."
+                ),
+                color=discord.Color.blue()
+            )
+            embed.set_author(name="TXA")
+            
+            active_count = len(config.ACTIVE_USERS)
+            embed.add_field(name="👤 Phiên hiện tại", value=f"```\n{active_count}\n```", inline=True)
+            embed.add_field(name="⏳ Hàng chờ", value="```\n0\n```", inline=True)
+            embed.add_field(name="▶️ Đang chạy", value=f"```\n{active_count}\n```", inline=True)
+            embed.add_field(name="✅ Tổng quest đã hoàn thành", value=f"```\n{config.TOTAL_COMPLETED}\n```", inline=False)
+            
+            current_time = time.strftime("%H:%M %d/%m/%y")
+            embed.set_footer(text=f"Auto Scan • Auto Accept • Auto Complete • {current_time} | Quest Bot v4.0 - Built by TXA")
 
-        # Try to find and edit the old message, or send a new one
-        message_found = False
-        if self.control_msg_id:
+            # Clean old bot messages and send a clean panel
             try:
-                msg = await channel.fetch_message(self.control_msg_id)
-                await msg.edit(embed=embed, view=ControlView(self))
-                message_found = True
-            except Exception:
-                pass
-
-        if not message_found:
-            # Clean old bot messages in the channel to prevent clutter
-            try:
-                async for msg in channel.history(limit=50):
+                async for msg in channel.history(limit=15):
                     if msg.author == self.user:
                         await msg.delete()
             except Exception as e:
-                log(f"Lỗi dọn dẹp tin nhắn cũ: {e}", "warn")
+                log(f"Lỗi dọn dẹp tin nhắn cũ ở kênh {cid}: {e}", "warn")
 
-            # Send fresh control panel
             try:
-                new_msg = await channel.send(embed=embed, view=ControlView(self))
-                self.control_msg_id = new_msg.id
+                await channel.send(embed=embed, view=ControlView(self))
             except Exception as e:
-                log(f"Không thể gửi tin nhắn bảng điều khiển: {e}", "error")
+                log(f"Không thể gửi tin nhắn bảng điều khiển tới kênh {cid}: {e}", "error")
 
 
 bot = QuestBot()
@@ -545,7 +561,7 @@ async def on_app_command_error(interaction: discord.Interaction, error: app_comm
 import typing
 
 
-# Slash Command: Set up channel
+# Slash Command: Set up channel by selecting channel
 @bot.tree.command(name="channel", description="[Admin] Cài đặt kênh hoạt động chính cho Bot và gửi Bảng điều khiển")
 @app_commands.describe(target_channel="Chọn kênh văn bản đặt bảng điều khiển từ danh sách kênh Server")
 async def set_channel(
@@ -554,7 +570,7 @@ async def set_channel(
 ):
     # Verify Admin permission
     if interaction.user.id not in config.ADMIN_IDS:
-        await interaction.response.send_message("❌ **Bạn không có quyền thực hiện lệnh này!** Chỉ Admin được cấu hình mới có quyền.", ephemeral=True)
+        await interaction.response.send_message("❌ **Bạn không có quyền thực hiện lệnh me!** Chỉ Admin được cấu hình mới có quyền.", ephemeral=True)
         return
 
     await interaction.response.defer(ephemeral=True)
@@ -572,33 +588,62 @@ async def set_channel(
         )
         return
 
-    # Save to dynamic config
-    save_channel_config(target_channel.id)
+    # Save to dynamic config for this specific server guild
+    guild_id = interaction.guild_id if interaction.guild else None
+    save_channel_config(target_channel.id, guild_id=guild_id)
 
-    # Recreate the control panel
-    bot.control_msg_id = None
-    await bot.update_control_panel()
+    # Recreate the control panel for this channel
+    await bot.update_control_panel(target_channel_id=target_channel.id)
 
     channel_mention = getattr(target_channel, "mention", f"<#{target_channel.id}>")
     await interaction.followup.send(f"✅ **Đã thiết lập kênh hoạt động thành công tại:** {channel_mention}", ephemeral=True)
 
 
+# Slash Command: Quick Setup in Current Channel
+@bot.tree.command(name="setup_here", description="[Admin] Cài đặt NGAY tại kênh hiện tại bạn đang gõ lệnh và gửi Bảng điều khiển")
+async def setup_here(interaction: discord.Interaction):
+    # Verify Admin permission
+    if interaction.user.id not in config.ADMIN_IDS:
+        await interaction.response.send_message("❌ **Bạn không có quyền thực hiện lệnh này!** Chỉ Admin được cấu hình mới có quyền.", ephemeral=True)
+        return
+
+    await interaction.response.defer(ephemeral=True)
+
+    target_channel = interaction.channel
+    if not target_channel or not hasattr(target_channel, "send"):
+        await interaction.followup.send("❌ **Kênh hiện tại không hỗ trợ gửi tin nhắn!**", ephemeral=True)
+        return
+
+    guild_id = interaction.guild_id if interaction.guild else None
+    save_channel_config(target_channel.id, guild_id=guild_id)
+
+    await bot.update_control_panel(target_channel_id=target_channel.id)
+
+    channel_mention = getattr(target_channel, "mention", f"<#{target_channel.id}>")
+    await interaction.followup.send(f"✅ **Đã thiết lập Bảng điều khiển thành công NGAY tại kênh:** {channel_mention}", ephemeral=True)
+
+
 # Slash Command: Start/Join guide (slash command)
 @bot.tree.command(name="start", description="Bắt đầu tự động làm quest hoặc hướng dẫn kênh hoạt động")
 async def start_command(interaction: discord.Interaction):
-    if not config.CHANNEL_ID:
+    guild_id = str(interaction.guild_id) if interaction.guild else None
+    server_channel_id = config.SERVER_CHANNELS.get(guild_id) if (guild_id and hasattr(config, 'SERVER_CHANNELS')) else config.CHANNEL_ID
+
+    if not server_channel_id and not config.CHANNEL_ID:
         await interaction.response.send_message(
-            "❌ **Cấu hình kênh hoạt động chưa được thiết lập!** Vui lòng liên hệ Admin để thiết lập bằng lệnh `/channel`.",
+            "❌ **Cấu hình kênh hoạt động chưa được thiết lập!** Vui lòng liên hệ Admin sử dụng lệnh `/setup_here` hoặc `/channel`.",
             ephemeral=True
         )
         return
 
-    if interaction.channel_id == config.CHANNEL_ID:
+    allowed = (interaction.channel_id == server_channel_id) or (interaction.channel_id == config.CHANNEL_ID)
+    if allowed:
         modal = TokenModal(bot)
         await interaction.response.send_modal(modal)
     else:
+        active_mention = f"<#{server_channel_id}>" if server_channel_id else f"<#{config.CHANNEL_ID}>"
         await interaction.response.send_message(
-            f"📢 **Để bắt đầu làm quest, vui lòng truy cập kênh hoạt động chính:** <#{config.CHANNEL_ID}>\n"
+            f"📢 **Để bắt đầu làm quest, vui lòng truy cập kênh hoạt động:** {active_mention}\n"
             f"Tại đó, bạn có thể nhấn nút **Bắt Đầu** 🚀 hoặc sử dụng lệnh `/start` để nhập token.",
             ephemeral=True
         )
